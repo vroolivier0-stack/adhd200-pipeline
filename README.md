@@ -48,13 +48,14 @@ Deux services extérieurs complètent l'ensemble : **Kaggle** pour l'entraîneme
 | `adhd/service.py` | L'API : tâches, scores, changement de modèle |
 | `adhd/dashboard.py` | Le tableau de bord |
 | `adhd/costs.py` | Estimation des coûts à partir des durées mesurées |
+| `adhd/drift_report.py`, `Dockerfile.evidently` | Rapport de dérive Evidently, dans sa propre boîte Docker |
 | `adhd/intake/` | Étapes amont de l'historique : contrôles, rapprochement des diagnostics, répartition des patients |
 | `adhd/historical.py`, `adhd/export.py` | Préparation des images d'entraînement et paquet pour Kaggle |
 | `adhd/learning.py`, `adhd/train.py` | Les deux architectures (SimpleCNN3D, ResNet3D) et leur entraînement |
 | `adhd/registry_deployment.py` | Lien entre le registre de modèles et le modèle servi |
 | `configs/` | Réglages : recette, rôles des hôpitaux, entraînement, seuils et tarifs |
 | `compose.yaml`, `Dockerfile` | L'installation complète |
-| `tests/` | 20 tests automatiques |
+| `tests/` | 21 tests automatiques |
 | `.github/workflows/` | Tests lancés à chaque envoi du code ; demande de réentraînement |
 | `docs/` | Documentation détaillée |
 
@@ -108,7 +109,7 @@ docker compose exec worker touch /data/raw/essai.txt
 - Quarantaine avec motif, sans blocage des autres images.
 - Deux relances automatiques par tâche, à 30 secondes d'intervalle.
 - Aucun doublon : un fichier déjà reçu est reconnu par son empreinte.
-- 20 tests automatiques, lancés dans Docker et sur GitHub à chaque envoi du code.
+- 21 tests automatiques, lancés dans Docker et sur GitHub à chaque envoi du code.
 
 ## Modèles
 
@@ -119,11 +120,32 @@ Deux architectures ont été comparées, chacune avec deux réglages : quatre en
 | `champion` (en service) | 3 | ResNet3D | 0,704 |
 | `challenger` | 4 | ResNet3D | 0,628 |
 
-Un modèle qui répond toujours la même chose est refusé. Un challenger peut recevoir une part des demandes (10 %) avant une éventuelle promotion, et l'ancien champion peut être restauré. Les jeux de test n'ont servi à aucun choix.
+Un modèle qui répond toujours la même chose est refusé. Un challenger peut recevoir une part des demandes (10 %) avant une éventuelle promotion, et l'ancien champion peut être restauré.
+
+Le champion a ensuite été noté une seule fois sur les images jamais vues. Ces jeux de test n'ont servi à aucun choix.
+
+| Groupe | Images | AUC | Sensibilité | Spécificité |
+| --- | --- | --- | --- | --- |
+| Test interne (hôpitaux connus) | 119 | 0,774 | 0,750 | 0,676 |
+| Test externe (NeuroIMAGE, jamais vu) | 73 | 0,615 | 0,694 | 0,595 |
+| Témoins externes (WashU, jamais vu) | 60 | — | — | 0,433 |
+
+Le détail, hôpital par hôpital, et les limites sont dans la [fiche du modèle](docs/model_card.md).
 
 ## Surveillance et coûts
 
 Chaque tâche enregistre sa durée et sa mémoire. Le pipeline en tire une estimation de coût, avec des tarifs déclarés comme hypothèses dans `configs/service.yaml`. Une alerte est émise si un lot tarde, si une tâche échoue, ou si les images reçues s'écartent de celles de l'entraînement.
+
+La dérive est suivie à deux niveaux :
+
+- **un contrôle simple, automatique**, toutes les 5 minutes : il compare la moyenne de quatre mesures des images reçues à celle de l'entraînement ;
+- **un rapport Evidently, à la demande** : il compare la répartition complète de ces mesures et produit un rapport illustré.
+
+```bash
+docker compose --profile monitoring run --rm drift-report
+```
+
+Le rapport est écrit dans `reports/compact/evidently/` et résumé dans le tableau de bord.
 
 ## Résultats observés au 7 octobre 2026
 
@@ -135,6 +157,36 @@ Chaque tâche enregistre sa durée et sa mémoire. Le pipeline en tire une estim
 | Passages du trajet des arrivées | 177 |
 | Temps de calcul cumulé | environ 6 minutes |
 | Coût local estimé | 0,002 € |
+| Dérive selon le contrôle simple (36 images) | non détectée |
+| Dérive selon Evidently (36 images contre 563) | détectée sur 2 mesures sur 4 : part occupée, zones claires |
+
+## Décisions et enseignements
+
+### Les décisions d'architecture
+
+| Décision | Choix retenu | Alternative écartée, et pourquoi |
+| --- | --- | --- |
+| Mode de traitement | Par lots, toutes les 5 minutes | Temps réel : aucune réponse n'est attendue à la seconde |
+| Orchestration | Airflow | Kafka, fait pour un flux continu ; un simple minuteur, sans relances ni historique |
+| Hébergement | Local, dans Docker | Cloud : les IRM brutes de mineurs restent sur la machine ; coût nul |
+| Exécution des tâches | Une API qui reçoit, un worker qui exécute, une file d'attente en base | Calcul dans Airflow : les demandes ne doivent pas se perdre si le calcul est occupé |
+| Protection des identités | Pseudonymisation par clé, appliquée dès la collecte | Pseudonymisation en amont, hors du pipeline : le code devait la porter lui-même |
+| Arrivées de démonstration | Hôpitaux réservés (Brown, WashU), jamais utilisés à l'entraînement | Télécharger d'autres IRM : le modèle aurait appris à reconnaître la collection |
+| Rôle des hôpitaux | Cinq pour apprendre, NeuroIMAGE pour un test externe, WashU en témoins externes | Tout mélanger : aucune mesure sur un hôpital inconnu |
+| Entraînement | Kaggle, avec un paquet d'images sans identifiant | Portable : pas de carte graphique |
+| Modèles comparés | Deux architectures, deux vitesses d'apprentissage, tout le reste identique | Davantage d'essais : le projet démontre une chaîne, pas un résultat scientifique |
+| Choix du champion | Sur la validation, après refus des modèles à réponse constante | Sur les jeux de test : ils auraient cessé d'être un examen honnête |
+| Rapport Evidently | Dans sa propre boîte Docker | Dans la boîte du pipeline : versions d'outils incompatibles |
+
+### Ce que les résultats ont appris
+
+- **Le modèle le plus simple ne décidait rien.** SimpleCNN3D répondait « témoin » à tout le monde. Son exactitude brute, 60 %, masquait une exactitude équilibrée de 0,5. D'où la règle : refuser tout modèle à réponse constante.
+- **Le modèle retenu tient sur les hôpitaux connus, pas ailleurs.** AUC de 0,77 en test interne, 0,61 sur un hôpital jamais vu.
+- **Sur WashU, il donne 34 fausses alertes pour 60 témoins.** Chaque appareil laisse une trace dans l'image ; le modèle en dépend en partie.
+- **Le contrôle simple de dérive n'a rien signalé ; Evidently, si.** Comparer des moyennes ne suffit pas : il faut comparer des répartitions.
+- **Une dérive n'est pas une mesure de performance.** Savoir si le modèle se trompe demande le vrai diagnostic, qui arrive plus tard.
+- **Les tests automatiques ont attrapé une vraie erreur** dans l'étape de collecte, avant qu'elle n'atteigne une démonstration.
+- **Le coût d'un traitement par lots est négligeable** : moins d'un centime pour 177 passages. Le poste réel serait l'entraînement.
 
 ## Limites
 
@@ -148,6 +200,7 @@ Chaque tâche enregistre sa durée et sa mémoire. Le pipeline en tire une estim
 
 | Document | Contenu |
 | --- | --- |
+| [docs/model_card.md](docs/model_card.md) | Fiche d'identité du modèle : données, résultats, limites |
 | [docs/operations.md](docs/operations.md) | Installation détaillée, Kaggle, modèles, sauvegardes |
 | [docs/decisions.md](docs/decisions.md) | Décisions prises et leurs raisons |
 | [docs/bloc3_cloture.md](docs/bloc3_cloture.md) | Correspondance avec les 21 points de la grille du bloc 3 |

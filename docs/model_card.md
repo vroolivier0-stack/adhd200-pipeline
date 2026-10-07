@@ -93,7 +93,7 @@ Calculée une seule fois, après le choix du champion. Aucun réglage n'a été 
 - Un seul entraînement par réglage : la variabilité entre deux tirages n'est pas mesurée.
 - Scores non calibrés : un score de 0,9 ne signifie pas 90 % de chances.
 - Crâne et visage présents dans les images.
-- Le contrôle de dérive du pipeline n'a pas signalé WashU, alors que le modèle y est dégradé : une dérive mesurée sur des indicateurs simples ne remplace pas la mesure de la performance.
+- Le contrôle simple de dérive du pipeline n'a rien signalé sur les images reçues (Brown, WashU), alors que le modèle est dégradé sur WashU. Le rapport Evidently du 7 octobre 2026 a, lui, détecté une dérive sur 2 mesures sur 4 : la part occupée par la tête dans le cube et le niveau des zones claires. Dans tous les cas, une dérive ne remplace pas la mesure de la performance.
 
 ## 7. Garde-fous en service
 

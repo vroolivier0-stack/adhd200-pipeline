@@ -38,6 +38,8 @@ Tout tourne en local, dans Docker. Les services ne sont joignables que depuis la
 | `api` | Reçoit les demandes de tâches, sert les scores | http://localhost:8000/docs | Code de ce dépôt |
 | `worker` | Exécute les tâches `collect`, `prepare`, `predict` | interne | Code de ce dépôt |
 | `dashboard` | Tableau de bord | http://localhost:8501 | Code de ce dépôt |
+| `drift-report` | Rapport de dérive Evidently, lancé à la demande | aucune | Code de ce dépôt, dans sa propre image |
+| `history` | Étapes amont de l'historique, lancées à la demande | aucune | Code de ce dépôt |
 
 Deux services extérieurs complètent l'ensemble : **Kaggle** pour l'entraînement sur carte graphique, à partir d'un paquet sans identifiant, et **DagsHub (MLflow)** pour ranger les modèles et désigner le champion.
 
@@ -136,6 +138,23 @@ Le champion a ensuite été noté une seule fois sur les images jamais vues. Ces
 
 Le détail, hôpital par hôpital, et les limites sont dans la [fiche du modèle](docs/model_card.md).
 
+## Changer de modèle
+
+Le registre MLflow fait foi : c'est l'étiquette `champion` du modèle `ADHD200_ANATOMICAL` qui désigne la version à servir. Changer de modèle ne demande aucune modification du code.
+
+```bash
+# Le modèle servi correspond-il à l'étiquette du registre ?
+docker compose run --rm worker python -m adhd.registry_deployment check
+
+# Installer la version désignée par l'étiquette : téléchargée, vérifiée, puis servie
+docker compose run --rm worker python -m adhd.registry_deployment deploy
+
+# Exercice de retour arrière : passer sur la version du challenger, puis revenir au champion
+docker compose run --rm worker python -m adhd.registry_deployment restore-exercise
+```
+
+Avant d'être servie, une version doit franchir les barrières de `configs/service.yaml` : classement minimal, décision non constante, fichier et recette de préparation vérifiés. Un challenger peut d'abord recevoir 10 % des demandes. Il n'est promu que s'il égale le champion, sans erreur ni lenteur. Chaque changement est inscrit dans un journal, visible dans l'onglet « Modèles » du tableau de bord. Si le modèle servi ne correspond plus à l'étiquette, une alerte est émise.
+
 ## Surveillance et coûts
 
 Chaque tâche enregistre sa durée et sa mémoire. Le pipeline en tire une estimation de coût, avec des tarifs déclarés comme hypothèses dans `configs/service.yaml`. Une alerte est émise si un lot tarde, si une tâche échoue, ou si les images reçues s'écartent de celles de l'entraînement.
@@ -161,6 +180,8 @@ Le rapport est écrit dans `reports/compact/evidently/` et résumé dans le tabl
 | Passages du trajet des arrivées | 177 |
 | Temps de calcul cumulé | environ 6 minutes |
 | Coût local estimé | 0,002 € |
+| Réponse de l'API pour 4 images, sur processeur | 0,33 s ; 95 % des demandes en moins de 0,48 s |
+| Entraînement des 4 modèles | 0,94 h mesurée (88 époques), environ 1 h 30 de session sur Kaggle |
 | Dérive selon le contrôle simple (36 images) | non détectée |
 | Dérive selon Evidently (36 images contre 563) | détectée sur 2 mesures sur 4 : part occupée, zones claires |
 
@@ -199,6 +220,12 @@ Le rapport est écrit dans `reports/compact/evidently/` et résumé dans le tabl
 - La préparation des images d'entraînement se lance à la demande, hors Airflow.
 - Un seul entraînement par réglage : la variabilité n'est pas mesurée.
 - Installation sur un seul poste : pas de haute disponibilité.
+
+## Origine des données
+
+Les IRM proviennent de la collection publique **ADHD-200**, réunie par l'ADHD-200 Consortium à partir de huit sites et diffusée aux chercheurs. Son utilisation est soumise aux conditions fixées par ses auteurs. Aucune image, aucun diagnostic et aucun identifiant de cette collection ne figure dans ce dépôt.
+
+Référence : The ADHD-200 Consortium, « The ADHD-200 Consortium: a model to advance the translational potential of neuroimaging in clinical neuroscience », *Frontiers in Systems Neuroscience*, 2012.
 
 ## Documentation
 

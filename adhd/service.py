@@ -125,7 +125,10 @@ def explain(body:Predict):
             grad=torch.autograd.grad(model(image).sum(),image)[0];importance=(grad*image).abs().detach().numpy()[0,0]
             if not np.isfinite(importance).all():raise ValueError('Explication invalide')
             importance/=max(float(importance.max()),1e-12)
-        return {'version':version,'method':'absolute_gradient_times_input','planes':[np.take(importance,64,axis=i)[::4,::4].tolist() for i in range(3)],'limit':'Sensibilité locale, pas de preuve causale ou médicale.'}
+        return {'version':version,'method':'absolute_gradient_times_input','planes':[np.take(importance,64,axis=i)[::4,::4].tolist() for i in range(3)],
+                # Pour l'affichage : la coupe du cerveau et la sensibilité au même format (64 x 64), à superposer.
+                'anatomy':[np.take(array,64,axis=i)[::2,::2].tolist() for i in range(3)],'heat':[np.take(importance,64,axis=i)[::2,::2].tolist() for i in range(3)],
+                'limit':'Sensibilité locale, pas de preuve causale ou médicale.'}
     finally:pending.release()
 @app.post('/jobs',dependencies=[Depends(admin)])
 def enqueue(body:Job):
@@ -211,18 +214,37 @@ def deploy(body:Deploy):
             else:raise ValueError('Action inconnue')
             save_json(root()/'models/compact/deployment.json',s);event('deployment',s);return s
     except (ValueError,RuntimeError,OSError,TypeError):raise HTTPException(409,'Action refusée : vérifier les critères et la version')
+def describe_version(version):
+    """Fiche lisible d'une version de modèle installée (architecture, score de validation, seuil)."""
+    try:
+        manifest=read(safe(root()/'models/compact',version)/'release.json');validation=manifest.get('validation') or {}
+        return {'version':version,'registry_version':str(manifest.get('mlflow_version') or ''),'architecture':manifest.get('architecture'),'threshold':manifest.get('threshold'),
+                'validation_roc_auc':validation.get('roc_auc'),'validation_balanced_accuracy':validation.get('balanced_accuracy')}
+    except Exception:return {'version':version}
 @app.get('/summary',dependencies=[Depends(reader)])
 def summary():
     with db() as conn:
         counts=conn.execute('SELECT status,count(*) AS n FROM items GROUP BY status').fetchall()
-        predictions=conn.execute('SELECT p.*,i.site FROM predictions p JOIN items i ON i.id=p.item_id ORDER BY p.created_at DESC LIMIT 50').fetchall()
+        predictions=conn.execute('SELECT p.*,i.site,i.batch_id,i.subject,i.prepared_sha,i.recipe FROM predictions p JOIN items i ON i.id=p.item_id ORDER BY p.created_at DESC LIMIT 200').fetchall()
         events=conn.execute("SELECT kind,body,created_at FROM events WHERE kind IN ('alert','monitoring','resources','retraining','registry_check') ORDER BY created_at DESC LIMIT 20").fetchall()
+        sites=conn.execute('SELECT site,status,count(*) AS n FROM items GROUP BY site,status ORDER BY site,status').fetchall()
+        batches=conn.execute("SELECT b.id,b.created_at,b.status,b.manifest->>'simulation' AS simulation,min(i.site) AS site,count(i.id) AS images,count(*) FILTER (WHERE i.status='predicted') AS predicted,count(*) FILTER (WHERE i.status='quarantined') AS quarantined FROM batches b LEFT JOIN items i ON i.batch_id=b.id GROUP BY b.id ORDER BY b.created_at DESC LIMIT 50").fetchall()
+        batch_count=conn.execute('SELECT count(*) AS n FROM batches').fetchone()['n']
+        quarantine=conn.execute("SELECT i.id,i.batch_id,i.site,i.reason,b.created_at FROM items i JOIN batches b ON b.id=i.batch_id WHERE i.status='quarantined' ORDER BY b.created_at DESC LIMIT 50").fetchall()
+        alerts=conn.execute("SELECT body,created_at FROM events WHERE kind='alert' ORDER BY created_at DESC LIMIT 30").fetchall()
+        monitoring=conn.execute("SELECT body,created_at FROM events WHERE kind='monitoring' ORDER BY created_at DESC LIMIT 1").fetchone()
+        deployments=conn.execute("SELECT body,created_at FROM events WHERE kind='deployment' ORDER BY created_at DESC LIMIT 15").fetchall()
     # Coûts estimés à partir des durées mesurées (voir adhd/costs.py) ; absents si non configurés.
     try:
         from .costs import summary as cost_summary
         costs=cost_summary()
     except Exception:costs=None
-    return {'deployment':state(),'items':counts,'predictions':predictions,'events':events,'costs':costs}
+    deployment=state()
+    known={p['version'] for p in predictions}|{deployment.get(k) for k in ('champion','challenger','previous','catalog_challenger')}
+    versions={v:describe_version(v) for v in known if v}
+    return {'deployment':deployment,'items':counts,'predictions':predictions,'events':events,'costs':costs,
+            'sites':sites,'batches':batches,'batch_count':batch_count,'quarantine':quarantine,'alerts':alerts,'monitoring':monitoring,'deployments':deployments,'versions':versions,
+            'monitoring_minimum_subjects':settings().get('minimum_monitoring_subjects')}
 
 @app.post('/watchdog',dependencies=[Depends(admin)])
 def watchdog():

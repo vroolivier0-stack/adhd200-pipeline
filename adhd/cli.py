@@ -241,7 +241,7 @@ def simulate(split_file,size=3,corrupt=False,site='Brown'):
             if fingerprint(source)!=row['source_sha256']:raise ValueError('Source modifiée')
             name=f'image_{i}.nii.gz';shutil.copyfile(source,staging/name);records.append({'file':name,'sha256':fingerprint(staging/name),'patient_id':patient_from_path(row['source_relative_path']),'site':site,'cohort':cohort})
         if corrupt:
-            (staging/'corrupt.nii.gz').write_bytes(b'corrupt synthetic test');records.append({'file':'corrupt.nii.gz','sha256':fingerprint(staging/'corrupt.nii.gz'),'subject':'synthetic_test','site':site,'cohort':'synthetic'})
+            (staging/'corrupt.nii.gz').write_bytes(b'corrupt synthetic test '+uuid.uuid4().hex.encode());records.append({'file':'corrupt.nii.gz','sha256':fingerprint(staging/'corrupt.nii.gz'),'subject':'synthetic_test','site':site,'cohort':'synthetic'})
         save_json(staging/'manifest.json',{'schema_version':1,'files':records,'simulation':True});(staging/'READY').write_text('complete\n');identifier=fingerprint(staging/'manifest.json');staging.rename(incoming/identifier)
     return {'batch':identifier,'count':len(records),'simulation':True}
 

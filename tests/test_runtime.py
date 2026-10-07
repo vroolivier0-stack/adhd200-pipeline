@@ -54,6 +54,9 @@ class RuntimeTests(unittest.TestCase):
         for key,value in model.state_dict().items():self.assertTrue(torch.equal(value,before[key]))
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'save.pt';save_checkpoint(path,{'schema_version':1,'weights':before,'optimizer':opt.state_dict()});self.assertEqual(load_checkpoint(path)['schema_version'],1)
+    def test_summary_serves_dashboard_data(self):
+        response=self.client.get('/summary',headers=self.reader);self.assertEqual(response.status_code,200)
+        for key in ('items','predictions','sites','batches','batch_count','quarantine','alerts','monitoring','deployments','versions','costs'):self.assertIn(key,response.json())
     def test_valid_and_corrupt_volume_continue(self):
         incoming=root()/'incoming'
         if incoming.exists():shutil.rmtree(incoming)

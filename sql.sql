@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS batches(id text PRIMARY KEY, manifest jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),status text NOT NULL DEFAULT 'received');
+CREATE TABLE IF NOT EXISTS items(id text PRIMARY KEY,batch_id text NOT NULL REFERENCES batches(id),subject text NOT NULL,site text NOT NULL,cohort text NOT NULL,raw_ref text NOT NULL,prepared_ref text,prepared_sha text,recipe text,features jsonb,status text NOT NULL DEFAULT 'received',reason text);
+CREATE TABLE IF NOT EXISTS predictions(item_id text NOT NULL REFERENCES items(id),version text NOT NULL,score double precision CHECK(score BETWEEN 0 AND 1),route text NOT NULL,created_at timestamptz DEFAULT now(),PRIMARY KEY(item_id,version));
+CREATE TABLE IF NOT EXISTS labels(item_id text PRIMARY KEY REFERENCES items(id),target integer CHECK(target IN (0,1)),purpose text CHECK(purpose IN ('evaluation_only','new_training')),source text NOT NULL);
+CREATE TABLE IF NOT EXISTS jobs(id text PRIMARY KEY,kind text NOT NULL,payload jsonb NOT NULL,status text NOT NULL DEFAULT 'queued',attempts integer NOT NULL DEFAULT 0,lease_at timestamptz,result jsonb,error text,created_at timestamptz DEFAULT now());
+CREATE TABLE IF NOT EXISTS events(id text PRIMARY KEY,kind text NOT NULL,body jsonb NOT NULL,created_at timestamptz DEFAULT now());

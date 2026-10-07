@@ -1,0 +1,15 @@
+schema_version: 1
+
+preprocessing:
+  recipe_version: ras_spacing_resize_pad_v1
+  status: pilot
+  orientation: RAS
+  intermediate_spacing_mm: [1.0, 1.0, 1.0]
+  output_edge: 128
+  intensity_percentiles: [1.0, 99.0]
+
+# Le recadrage utilise les valeurs non nulles.
+# Les percentiles sont calculés sur les valeurs non nulles après recadrage.
+# Le redimensionnement conserve approximativement les proportions.
+# L'espacement final peut différer de l'espacement intermédiaire.
+# Aucun retrait du crâne ou effacement du visage à cette étape.

@@ -1,0 +1,15 @@
+schema_version: 1
+# Seuils de démonstration choisis pour ce projet, pas imposés par le jury.
+minimum_auc: 0.55
+minimum_balanced_accuracy: 0.50
+canary_fraction: 0.10
+minimum_canary_requests: 10
+maximum_error_fraction: 0.05
+maximum_p95_seconds: 10
+minimum_monitoring_subjects: 20
+minimum_labeled_each_class: 5
+standardized_shift_threshold: 2
+performance_auc_drop: 0.10
+batch_delay_seconds: 1200
+minimum_new_training_subjects: 20
+automatic_retraining: false

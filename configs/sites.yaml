@@ -1,0 +1,21 @@
+schema_version: 1
+protocol: center_holdout_internal_v2
+seed: 42
+
+# Répartition par patients, au sein de chaque groupe centre/classe.
+validation_fraction: 0.15
+test_fraction: 0.15
+
+# Les patients restants de ces centres servent à l'entraînement.
+roles:
+  KKI: train_validation
+  NYU: train_validation
+  OHSU: train_validation
+  PEK: train_validation
+  Pittsburgh: train_validation
+  NeuroIMAGE: external_test
+  WashU: external_controls
+  Brown: arrivals_reserve
+
+# Le futur trajet historique de préparation ignorera Brown.
+# Le futur trajet des arrivées traitera les lots Brown simulés.

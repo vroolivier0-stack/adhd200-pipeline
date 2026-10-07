@@ -1,0 +1,24 @@
+.runtime/
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.nii
+*.nii.gz
+*.npz
+*.npy
+*.pt
+*.pth
+*.key
+*.pem
+*.zip
+*.db
+*.sqlite*
+data/
+logs/
+mlruns/
+
+# Sauvegardes et auxiliaire local
+compose.yaml.before-dag-fix
+compose.yaml.backup_*
+/kaggle_bootstrap.py

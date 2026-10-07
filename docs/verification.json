@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-06",
+  "files_at_check": 33,
+  "python_files_parsed": 16,
+  "yaml_files_parsed": 7,
+  "empty_files": 0,
+  "pure_tests_passed": 5,
+  "docker_available_here": false,
+  "full_runtime_tests_executed_here": false,
+  "cuda_executed_here": false,
+  "dag_execution_here": false,
+  "no_patient_data_used": true,
+  "scope": "Syntaxe, structure Compose/YAML et cinq tests NumPy/stdlib. Tests intégrés CPU/API/DB et DagBag conditionnent l’installation sur WSL.",
+  "runtime_test_cases_supplied": 8
+}

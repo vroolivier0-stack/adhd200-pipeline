@@ -1,0 +1,124 @@
+name: adhd200-compact
+x-app: &app
+  image: adhd200-compact:local
+  build:
+    context: .
+    args: {PIPELINE_UID: "${PIPELINE_UID:-1000}", PIPELINE_GID: "${PIPELINE_GID:-1000}"}
+  user: "${PIPELINE_UID:-1000}:${PIPELINE_GID:-1000}"
+  environment: &env
+    DATA_ROOT: /data
+    API_URL: http://api:8000
+    MLFLOW_TRACKING_URI: https://dagshub.com/vroolivier0/adhd200-pipeline.mlflow
+    MLFLOW_TRACKING_USERNAME: vroolivier0
+    KAGGLE_DATASET: "${KAGGLE_DATASET:-}"
+    KAGGLE_KERNEL: "${KAGGLE_KERNEL:-}"
+  volumes:
+    - ${ADHD_DATA:?Set ADHD_DATA}/raw:/data/raw:ro
+    - ${ADHD_DATA}/reports/private:/data/reports/private:ro
+    - ${ADHD_DATA}/reports/compact:/data/reports/compact
+    - ${ADHD_DATA}/historical:/data/historical
+    - ${ADHD_DATA}/export_kaggle:/data/export_kaggle
+    - ${ADHD_DATA}/incoming:/data/incoming
+    - ${ADHD_DATA}/arrivals:/data/arrivals
+    - ${ADHD_DATA}/quarantine:/data/quarantine
+    - ${ADHD_DATA}/reference:/data/reference
+    - ${ADHD_DATA}/models:/data/models
+    - ${ADHD_DATA}/logs:/data/logs
+    - ./configs:/app/configs:ro
+  secrets: [api_key, admin_key, app_dsn, mlflow_password, kaggle_username, kaggle_key]
+  restart: unless-stopped
+  init: true
+  mem_limit: 4g
+  cpus: 2
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment: {POSTGRES_USER: compact_admin, POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password}
+    secrets: [postgres_password]
+    volumes: ["database:/var/lib/postgresql/data", "./.runtime/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U compact_admin -d postgres"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 1g
+  init:
+    <<: *app
+    command: [python, -m, adhd.cli, db-init]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: "no"
+  tests:
+    <<: *app
+    profiles: [test]
+    environment: {<<: *env, APP_DSN_FILE: /run/secrets/test_dsn, RUN_RUNTIME_TESTS: "1"}
+    secrets: [api_key, admin_key, test_dsn]
+    volumes: ["./.runtime/testdata:/data", "./configs:/app/configs:ro"]
+    command: [python, /app/tests/run.py]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: "no"
+  api:
+    <<: *app
+    command: [uvicorn, adhd.service:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on: {init: {condition: service_completed_successfully}}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=5)"]
+      interval: 10s
+      retries: 10
+  worker:
+    <<: *app
+    command: [python, -m, adhd.cli, worker]
+    depends_on: {api: {condition: service_healthy}}
+  dashboard:
+    <<: *app
+    command: [streamlit, run, /app/adhd/dashboard.py, --server.address, 0.0.0.0, --server.port, "8501", --browser.gatherUsageStats, "false"]
+    ports: ["127.0.0.1:8501:8501"]
+    depends_on: {api: {condition: service_healthy}}
+    mem_limit: 1g
+  dag-check:
+    image: apache/airflow:3.3.2-python3.12
+    profiles: [test]
+    user: "${PIPELINE_UID:-1000}:0"
+    volumes: ["./dags:/opt/project/dags:ro"]
+    command: ["python", "-c", "import os\nos.environ[\"AIRFLOW__CORE__DAGS_FOLDER\"] = \"/opt/project/dags\"\nos.environ[\"AIRFLOW__CORE__LOAD_EXAMPLES\"] = \"false\"\n\nfrom airflow.dag_processing.dagbag import DagBag\n\nbag = DagBag()\nassert not bag.import_errors, bag.import_errors\nassert set(bag.dags) == {\"adhd_arrivals\", \"adhd_monitoring\"}, list(bag.dags)\n\narrivals = bag.dags[\"adhd_arrivals\"]\nassert set(arrivals.task_ids) == {\"collect\", \"prepare\", \"predict\"}\nassert arrivals.get_task(\"collect\").downstream_task_ids == {\"prepare\"}\nassert arrivals.get_task(\"prepare\").downstream_task_ids == {\"predict\"}\nassert arrivals.get_task(\"predict\").downstream_task_ids == set()\n\nmonitoring = bag.dags[\"adhd_monitoring\"]\nassert set(monitoring.task_ids) == {\"monitor\"}\n\nprint(\"\\nCONTRÔLE AIRFLOW RÉUSSI\")\nprint(\"Deux DAGs chargés sans erreur.\")\nprint(\"Arrivées : collect → prepare → predict.\")\nprint(\"Surveillance : monitor.\")\nprint(\"Aucune tâche exécutée ; aucune IRM traitée.\")"]
+    restart: "no"
+  airflow-volume-init:
+    image: apache/airflow:3.3.2-python3.12
+    user: "0:0"
+    entrypoint: /bin/bash
+    command: ["-c", "mkdir -p /opt/airflow/logs && chown -R ${PIPELINE_UID:-1000}:0 /opt/airflow"]
+    volumes: ["airflow-home:/opt/airflow"]
+    restart: "no"
+  airflow:
+    image: apache/airflow:3.3.2-python3.12
+    user: "${PIPELINE_UID:-1000}:0"
+    command: ["bash", "-ec", "umask 077; python -c 'import json\nimport os\nfrom pathlib import Path\n\ndirectory = Path(\"/opt/airflow/private\")\ndirectory.mkdir(mode=0o700, exist_ok=True)\ndirectory.chmod(0o700)\ndestination = directory / \"airflow_users.json\"\n\nif not destination.exists():\n    content = Path(\"/run/secrets/airflow_users\").read_text()\n    assert isinstance(json.loads(content).get(\"jury\"), str)\n    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n    with os.fdopen(fd, \"w\") as stream:\n        stream.write(content)\n\ndestination.chmod(0o600)\nwith destination.open(\"a+\"):\n    pass\nprint(\"Fichier priv\u00e9 des identifiants accessible en \u00e9criture.\")'; exec airflow standalone"]
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "python -c 'from pathlib import Path; import sys; sys.stdout.write(Path('\"'\"'/run/secrets/airflow_dsn'\"'\"').read_text().strip())'"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: jury:admin
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/private/airflow_users.json
+      AIRFLOW__API_AUTH__JWT_SECRET_CMD: "python -c 'from pathlib import Path; import sys; sys.stdout.write(Path('\"'\"'/run/secrets/airflow_jwt'\"'\"').read_text().strip())'"
+    volumes: ["airflow-home:/opt/airflow", "./dags:/opt/project/dags:ro"]
+    secrets: [admin_key, airflow_dsn, airflow_users, airflow_jwt]
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on: {postgres: {condition: service_healthy}, api: {condition: service_healthy}, airflow-volume-init: {condition: service_completed_successfully}}
+    restart: unless-stopped
+    mem_limit: 3g
+volumes: {database: {}, airflow-home: {}}
+secrets:
+  postgres_password: {file: .runtime/postgres_password}
+  app_dsn: {file: .runtime/app_dsn}
+  test_dsn: {file: .runtime/test_dsn}
+  airflow_dsn: {file: .runtime/airflow_dsn}
+  airflow_users: {file: .runtime/airflow_users.json}
+  airflow_jwt: {file: .runtime/airflow_jwt}
+  api_key: {file: .runtime/api_key}
+  admin_key: {file: .runtime/admin_key}
+  mlflow_password: {file: .runtime/mlflow_password}
+  kaggle_username: {file: .runtime/kaggle_username}
+  kaggle_key: {file: .runtime/kaggle_key}

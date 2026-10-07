@@ -1,0 +1,35 @@
+name: Tests et déploiement local
+on:
+  push: {branches: [main]}
+  pull_request:
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: "pipeline-${{ github.ref }}", cancel-in-progress: false}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python deploy.py prepare --data "$RUNNER_TEMP/adhd_test"
+      - run: docker compose config --quiet
+      - run: docker compose build api
+      - run: docker compose up -d postgres
+      - run: docker compose --profile test run --rm tests
+      - run: docker compose --profile test run --rm dag-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-cpu-database
+          path: .runtime/testdata/logs/compact/tests.json
+      - run: docker compose down
+        if: always()
+  deploy:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, adhd-wsl]
+    environment: local-demo
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 deploy.py install --target "$HOME/ADHD200_PIPELINE" --data "$HOME/ADHD200_DATA"

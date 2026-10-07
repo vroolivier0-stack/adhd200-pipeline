@@ -1,0 +1,26 @@
+name: Soumettre un réentraînement validé
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: "Chemin relatif reference/compact/retraining/*.json validé"
+        required: true
+        type: string
+permissions: {contents: read}
+concurrency: {group: retraining, cancel-in-progress: false}
+jobs:
+  submit:
+    runs-on: [self-hosted, linux, adhd-wsl]
+    environment: local-demo
+    steps:
+      - name: Soumettre avec les secrets locaux et les barrières de transfert
+        env:
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          path=pathlib.PurePosixPath(os.environ['SNAPSHOT'])
+          if path.is_absolute() or '..' in path.parts or not str(path).startswith('reference/compact/retraining/'):
+              raise SystemExit('Snapshot refusé')
+          subprocess.run(['python3', str(pathlib.Path.home()/'ADHD200_PIPELINE/deploy.py'), 'cli', 'retrain', '/data/'+str(path)],check=True)
+          PY

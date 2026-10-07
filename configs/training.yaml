@@ -1,0 +1,144 @@
+schema_version: 1
+protocol: comparable_training_v1
+status: initial_plan
+
+# Fixer les tirages aléatoires pour comparer les premiers essais.
+seed: 42
+
+models:
+  simplecnn3d:
+    base_channels: 8
+    dropout: 0.20
+  resnet3d:
+    base_channels: 8
+    dropout: 0.20
+    blocks_per_stage: [1, 1, 1, 1]
+
+training:
+  # Les véritables entraînements doivent utiliser le GPU de Kaggle.
+  require_cuda: true
+
+  # Un passage sur toutes les images d'entraînement est une époque.
+  max_epochs: 40
+  batch_size: 2
+
+  # Cumuler plusieurs petits lots avant d'ajuster les poids.
+  accumulation_steps: 4
+
+  # Le programme choisira un format compatible avec le GPU détecté.
+  mixed_precision: auto
+
+  # Aider à reproduire un essai dans le même environnement.
+  deterministic: true
+
+  # Limiter un ajustement excessif des poids.
+  gradient_clip_norm: 1.0
+
+  # Démarrer avec peu de lecteurs pour maîtriser la mémoire.
+  num_workers: 2
+
+loss:
+  name: BCEWithLogitsLoss
+
+  # Calculer cette pondération exclusivement sur l'entraînement.
+  positive_weight_source: train_patient_counts
+
+optimizer:
+  name: AdamW
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+  # Ne pas pénaliser les paramètres de normalisation ni les biais.
+  exclude_normalization_and_bias_from_decay: true
+
+scheduler:
+  # Réduire la vitesse d'apprentissage si la validation stagne.
+  name: ReduceLROnPlateau
+  monitor: roc_auc
+  mode: max
+  factor: 0.5
+  patience: 3
+  threshold: 0.001
+  threshold_mode: abs
+  min_learning_rate: 0.000001
+
+early_stopping:
+  monitor: roc_auc
+  mode: max
+  min_epochs: 10
+  patience: 8
+  min_delta: 0.001
+
+evaluation:
+  # Seuil initial fixe ; aucun réglage sur les groupes de test.
+  threshold: 0.5
+  selection_metric: roc_auc
+  report_by_site: true
+
+augmentation:
+  # Première référence sans transformation aléatoire des images.
+  # Une comparaison avec augmentation sera étudiée ensuite.
+  enabled: false
+
+experiments:
+  # Première comparaison : deux vitesses pour chacun des deux modèles.
+  initial_learning_rates: [0.001, 0.0003]
+
+  # Répéter ensuite les configurations retenues avec d'autres tirages.
+  confirmation_seeds: [42, 123, 2026]
+
+  # Limite de campagne, à réexaminer après mesure du premier essai.
+  maximum_full_runs: 12
+
+tracking:
+  # Enregistrer les résultats localement même avant le raccordement MLflow.
+  save_local_artifacts: true
+  save_best_model: true
+  save_resume_checkpoint: true
+  record_environment_versions: true
+  record_epoch_duration: true
+  record_peak_gpu_memory: true
+
+  # Sélection des métriques et artefacts publiés ; calculs conservés dans le code.
+  mlflow:
+    policy_version: 1
+    experiment: ADHD200_compact
+    publication: end_of_run
+    log_every_epochs: 1
+    report_by_site: true
+    metrics:
+      epoch:
+        - train_loss
+        - validation_loss
+        - learning_rate
+        - epoch_duration_seconds
+        - peak_gpu_memory_mib
+        - optimizer_updates
+        - skipped_updates
+      validation:
+        - roc_auc
+        - average_precision
+        - accuracy
+        - balanced_accuracy
+        - sensitivity
+        - specificity
+        - precision
+        - f1
+        - brier_score
+    artifacts:
+      - run_info.json
+      - summary.json
+      - history.json
+      - best_validation.json
+      - best.pt
+      - last.pt
+
+review:
+  remaining_questions:
+    - model_width_and_resnet_depth
+    - training_augmentation
+    - dropout_and_weight_decay
+    - GPU_batch_size_and_precision
+    - score_calibration
+    - performance_by_site
+    - remote_tracking_and_data_protection

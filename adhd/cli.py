@@ -221,23 +221,39 @@ def import_model(folder):
     from .service import load
     load(identifier);return {'version':identifier}
 
-def simulate(split_file,size=3,corrupt=False):
+def simulate(split_file,size=3,corrupt=False,site='Brown'):
+    # Arrivée SIMULÉE : comme un hôpital, le lot fournit le numéro de dossier (patient_id).
+    # C'est l'étape de collecte qui le remplace par un code brouillé avec la clé secrète.
+    from .identity import patient_from_path
+    reserves={'Brown':('arrivals_reserve','arrivals_reserve'),'WashU':('controls_external','evaluation_only')}
+    if site not in reserves:raise ValueError('Hôpital non réservé aux arrivées')
+    wanted,cohort=reserves[site]
     split=read(split_file)
     if split.get('split_version')!='split_v2' or not 1<=size<=9:raise ValueError('Manifeste v2 et taille 1 à 9 requis')
     incoming=root()/'incoming';incoming.mkdir(parents=True,exist_ok=True,mode=0o700);used=set()
     for p in incoming.glob('*/manifest.json'):used.update(r['sha256'] for r in read(p)['files'])
-    rows=[r for r in split['records'] if r['split']=='arrivals_reserve' and r['site']=='Brown' and r['source_sha256'] not in used][:size]
+    rows=[r for r in split['records'] if r['split']==wanted and r['site']==site and r['source_sha256'] not in used][:size]
     if not rows:raise ValueError('Réserve épuisée')
     with tempfile.TemporaryDirectory(prefix='.staging_',dir=incoming) as directory:
         staging=Path(directory);records=[]
         for i,row in enumerate(rows):
             source=safe(root()/'raw',row['source_relative_path'])
             if fingerprint(source)!=row['source_sha256']:raise ValueError('Source modifiée')
-            name=f'image_{i}.nii.gz';shutil.copyfile(source,staging/name);records.append({'file':name,'sha256':fingerprint(staging/name),'subject':row['pseudo_id'],'site':'Brown','cohort':'arrivals_reserve'})
+            name=f'image_{i}.nii.gz';shutil.copyfile(source,staging/name);records.append({'file':name,'sha256':fingerprint(staging/name),'patient_id':patient_from_path(row['source_relative_path']),'site':site,'cohort':cohort})
         if corrupt:
-            (staging/'corrupt.nii.gz').write_bytes(b'corrupt synthetic test');records.append({'file':'corrupt.nii.gz','sha256':fingerprint(staging/'corrupt.nii.gz'),'subject':'synthetic_test','site':'Brown','cohort':'synthetic'})
+            (staging/'corrupt.nii.gz').write_bytes(b'corrupt synthetic test');records.append({'file':'corrupt.nii.gz','sha256':fingerprint(staging/'corrupt.nii.gz'),'subject':'synthetic_test','site':site,'cohort':'synthetic'})
         save_json(staging/'manifest.json',{'schema_version':1,'files':records,'simulation':True});(staging/'READY').write_text('complete\n');identifier=fingerprint(staging/'manifest.json');staging.rename(incoming/identifier)
     return {'batch':identifier,'count':len(records),'simulation':True}
+
+def identity_check(split_file):
+    """Vérifier que le brouillage du pipeline redonne exactement les codes déjà attribués."""
+    from .identity import SITE_CODES,load_key,patient_from_path,pseudonymize
+    key=load_key();same=different=0
+    for row in read(split_file)['records']:
+        code=pseudonymize(SITE_CODES[row['site']],patient_from_path(row['source_relative_path']),key)
+        if code==row['pseudo_id']:same+=1
+        else:different+=1
+    return {'records':same+different,'identical':same,'different':different}
 
 def gate(package,review):
     decision=read(review)
@@ -359,7 +375,10 @@ def main():
     sub.add_parser('db-init');sub.add_parser('worker')
     p=sub.add_parser('verify');p.add_argument('package',type=Path)
     p=sub.add_parser('compatibility');p.add_argument('package',type=Path);p.add_argument('split',type=Path);p.add_argument('export_report',type=Path)
-    p=sub.add_parser('simulate');p.add_argument('split',type=Path);p.add_argument('--size',type=int,default=3);p.add_argument('--corrupt',action='store_true')
+    p=sub.add_parser('simulate');p.add_argument('split',type=Path);p.add_argument('--size',type=int,default=3);p.add_argument('--corrupt',action='store_true');p.add_argument('--site',choices=('Brown','WashU'),default='Brown')
+    p=sub.add_parser('identity-check');p.add_argument('split',type=Path)
+    sub.add_parser('costs')
+    p=sub.add_parser('intake');p.add_argument('step',choices=('technical_profile','validate_dataset','match_phenotypes','bias_audit','split_dataset'));p.add_argument('arguments',nargs=argparse.REMAINDER)
     p=sub.add_parser('import-model');p.add_argument('folder',type=Path)
     p=sub.add_parser('kernel');p.add_argument('output',type=Path);p.add_argument('--id',required=True);p.add_argument('--dataset',required=True)
     p=sub.add_parser('campaign');p.add_argument('package',type=Path);p.add_argument('output',type=Path)
@@ -377,7 +396,18 @@ def main():
         return worker()
     elif args.command=='verify':result={'groups':verify(args.package)[0]['groups']}
     elif args.command=='compatibility':result=compatibility(args.package,args.split,args.export_report)
-    elif args.command=='simulate':result=simulate(args.split,args.size,args.corrupt)
+    elif args.command=='simulate':result=simulate(args.split,args.size,args.corrupt,args.site)
+    elif args.command=='identity-check':result=identity_check(args.split)
+    elif args.command=='costs':
+        from .costs import report
+        from datetime import datetime,timezone
+        result=report();save_json(root()/'reports/compact'/('costs_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'.json'),result)
+    elif args.command=='intake':
+        # Étapes amont du trajet historique (voir adhd/intake/__init__.py).
+        import importlib,sys
+        module=importlib.import_module('adhd.intake.'+args.step)
+        sys.argv=['adhd.cli intake '+args.step,*[a for a in args.arguments if a!='--']]
+        return module.main()
     elif args.command=='import-model':result=import_model(args.folder)
     elif args.command=='kernel':result={'directory':kernel(args.output,args.id,args.dataset)}
     elif args.command=='campaign':result=campaign(args.package,args.output)

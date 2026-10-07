@@ -43,6 +43,9 @@ Le traitement est un ETL par petits lots : aucun besoin établi de Kafka ou de s
 | Fichier | Responsabilité |
 | --- | --- |
 | `adhd/utils.py` | Fichiers atomiques, chemins sûrs, secrets, HTTP et DB |
+| `adhd/identity.py` | Pseudonymisation HMAC : appliquée à la collecte des arrivées et au rapprochement historique |
+| `adhd/intake/` | Étapes amont du trajet historique : contrôle technique, liste acceptée, rapprochement des diagnostics, audit des biais, répartition |
+| `adhd/costs.py` | Estimation des coûts à partir des durées mesurées et des tarifs de `configs/service.yaml` |
 | `adhd/data.py` | Préparation commune aux volumes historiques et arrivées |
 | `adhd/historical.py` | Retraitement historique versionné et reprise |
 | `adhd/export.py` | Export local train/validation sans tests |
@@ -54,7 +57,7 @@ Le traitement est un ETL par petits lots : aucun besoin établi de Kafka ou de s
 | `adhd/dashboard.py` | Présentation des résultats et supervision |
 | `dags/pipeline.py` | Deux DAGs planifiés |
 
-Le code antérieur de validation/rapprochement reste dans le projet archivé : ses rapports deviennent des entrées validées de cette version. Cette livraison ne reconstruit pas arbitrairement les patients, les diagnostics ou leurs groupes. Un nouvel inventaire complet exigerait de réexécuter ces étapes avec une nouvelle version de protocole et de conserver leurs preuves.
+Les étapes amont (contrôle technique, liste acceptée, rapprochement des diagnostics avec pseudonymisation, audit des biais, répartition) font partie de ce dépôt : `adhd/intake/`, lancées par `python -m adhd.cli intake <étape>` dans le service `history`. Ce sont les programmes qui ont produit les rapports privés utilisés ici, repris sans changement de logique. Leur réexécution dans cette image reste à vérifier ; elle créerait de nouveaux rapports sans modifier les anciens.
 
 ## Données et décisions conservées
 
@@ -83,7 +86,7 @@ RAS → espacement intermédiaire 1 mm → recadrage non nul → percentiles 1/9
 
 La nouvelle version fixe les labels d'orientation explicitement et refuse unités non mm, affines invalides et étendues supérieures à 500 mm. Ce dernier seuil est un garde-fou technique de projet, pas une norme médicale. Le contrat lie recette, code, données exportées et modèle. Un contrôle de compatibilité est imposé avant réutilisation de l'ancien export.
 
-Les originaux sont montés en lecture seule. Les identifiants ont déjà été pseudonymisés par HMAC avec clé hors du code. Les copies Brown transportent leurs pseudonymes uniquement dans les manifestes privés ; le dashboard affiche des empreintes techniques. Les empreintes binaires et numériques repèrent certaines répétitions, pas toutes les conversions d'une même acquisition.
+Les originaux sont montés en lecture seule. Les identifiants sont pseudonymisés par HMAC avec une clé hors du code (`adhd/identity.py`). Pour les arrivées, le lot fournit le numéro de dossier et l'étape de collecte le remplace par son code : seul le code est enregistré en base, et un identifiant en clair est refusé. Les lots Brown déjà reçus transportaient un code calculé en amont, toujours accepté ; le dashboard affiche des empreintes techniques. Les empreintes binaires et numériques repèrent certaines répétitions, pas toutes les conversions d'une même acquisition.
 
 Le paquet Kaggle actuel contient seulement 563 train +119 validation, tableaux float32 128³, environ 2,66 Gio. La protection faciale de l’ensemble des volumes n’est pas certifiée par ce code : **le seul contrôle d’intégrité ne vaut pas autorisation de transfert**. Les aperçus examinés sont compatibles avec un masquage source, sans preuve exhaustive d’anonymisation. Voir la revue et les conditions de transfert dans [docs/operations.md](docs/operations.md).
 
@@ -227,4 +230,4 @@ Les contrôles acquis ne signifient pas que le bloc est entièrement validé : r
 
 La revue du ZIP de 37 fichiers a confirmé la préparation commune historique/arrivées, les signatures, la réutilisation contrôlée des sorties, les secrets externalisés et les workflows GitHub présents. Cinq tests NumPy/stdlib ont été exécutés lors de cette revue et ont réussi ; les 16 tests Docker précédemment réussis sur WSL constituent une preuve distincte. La présence des workflows ne prouve pas leur exécution sur GitHub. Les rapports `b3_final_checks_*` décrivent le périmètre réellement démontré par les contrôles complémentaires.
 
-Le code amont de pseudonymisation et de rapprochement demeure dans le projet archivé ; les manifestes pseudonymisés sont des entrées du pipeline compact. Cet amont doit rester identifiable et accessible au jury avec ses preuves, sans publier la clé ni les correspondances privées.
+Depuis le 7 octobre, le code amont de pseudonymisation et de rapprochement est intégré au dépôt (`adhd/identity.py`, `adhd/intake/`). Ni la clé ni les correspondances privées ne sont publiées. Trois points restent à confirmer par exécution sur WSL : les tests Docker, l'égalité des codes recalculés (`python deploy.py cli identity-check <répartition privée>`) et un lot réel fournissant des numéros de dossier.

@@ -1,5 +1,7 @@
 """Intégration réelle CPU/API/PostgreSQL avec données fictives isolées."""
 import copy
+import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -63,6 +65,26 @@ class RuntimeTests(unittest.TestCase):
         with db() as conn:self.assertEqual(conn.execute('SELECT count(*) AS n FROM items').fetchone()['n'],2)
         result=prepare(first['batches']);self.assertEqual(result['prepared'],1);self.assertEqual(result['quarantined'],1);self.assertEqual(prepare(first['batches'])['prepared'],0)
         self.assertTrue((folder/'good.nii.gz').exists())
+    def test_collect_pseudonymizes_patient_identifier(self):
+        from adhd.identity import pseudonymize,SITE_CODES
+        incoming=root()/'incoming'
+        if incoming.exists():shutil.rmtree(incoming)
+        key=bytes(range(32));array=np.zeros((24,24,24),np.float32);array[3:20,3:20,3:20]=np.linspace(.1,1,17**3).reshape(17,17,17)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                key_file=Path(directory)/'pseudonymization.key';key_file.write_bytes(key);key_file.chmod(0o600)
+                # Lot 1 : numéro de dossier fourni, le pipeline doit le brouiller. Lot 2 : identifiant en clair, à refuser.
+                for name,scale,identity in (('with_patient_id',1.0,{'patient_id':'0026001'}),('clear_identifier',0.5,{'subject':'0026002'})):
+                    folder=incoming/name;folder.mkdir(parents=True);image=nib.Nifti1Image(array*scale,np.eye(4));image.header.set_xyzt_units('mm');nib.save(image,folder/'scan.nii.gz')
+                    save_json(folder/'manifest.json',{'schema_version':1,'files':[{'file':'scan.nii.gz','sha256':fingerprint(folder/'scan.nii.gz'),'site':'Brown','cohort':'arrivals_reserve',**identity}]});(folder/'READY').write_text('ready')
+                with patch.dict(os.environ,{'PSEUDONYMIZATION_KEY_FILE':str(key_file)}):result=collect()
+            self.assertEqual(len(result['batches']),1)
+            with db() as conn:
+                subjects=[r['subject'] for r in conn.execute('SELECT subject FROM items').fetchall()]
+                stored=json.dumps(conn.execute('SELECT manifest FROM batches').fetchone()['manifest'])
+            self.assertEqual(subjects,[pseudonymize(SITE_CODES['Brown'],'26001',key)])
+            self.assertNotIn('0026001',stored);self.assertNotIn('patient_id',stored);self.assertNotIn('0026002',stored)
+        finally:shutil.rmtree(incoming,ignore_errors=True)
     def test_api_auth_queue_and_no_fake_model(self):
         self.assertEqual(self.client.get('/health').status_code,200);self.assertEqual(self.client.get('/summary').status_code,401);self.assertEqual(self.client.get('/ready').status_code,503)
         payload={'key':'test','kind':'collect'};self.assertEqual(self.client.post('/jobs',headers=self.reader,json=payload).status_code,401)

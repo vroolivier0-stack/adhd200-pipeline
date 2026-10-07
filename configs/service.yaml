@@ -13,3 +13,13 @@ performance_auc_drop: 0.10
 batch_delay_seconds: 1200
 minimum_new_training_subjects: 20
 automatic_retraining: false
+
+# --- Coûts : HYPOTHÈSES de tarif, à ajuster. Les durées, elles, sont mesurées par le pipeline.
+costs:
+  local_power_watts: 65            # consommation du portable en charge
+  electricity_eur_per_kwh: 0.25
+  grid_gco2_per_kwh: 60            # électricité française, ordre de grandeur
+  cloud_cpu_eur_per_hour: 0.10     # petite machine équivalente dans le cloud
+  cloud_gpu_eur_per_hour: 0.60     # carte graphique d'entrée de gamme
+  storage_eur_per_gb_month: 0.02
+  gpu_hours_training: 0            # heures de GPU consommées sur Kaggle : à renseigner

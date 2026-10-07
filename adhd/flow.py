@@ -9,19 +9,29 @@ import time
 import uuid
 import numpy as np
 from .utils import root,safe,read,save_json,db,event,fingerprint,recipe,recipe_hash,settings,http,volume
+from .identity import SITE_CODES,load_key,subject_for
 
 def collect():
     batches=[];incoming=root()/'incoming';incoming.mkdir(parents=True,exist_ok=True,mode=0o700)
+    # La clé de pseudonymisation n'est lue que si un lot apporte des numéros de dossier.
+    loaded={}
+    def secret_key():
+        if 'key' not in loaded:loaded['key']=load_key()
+        return loaded['key']
     for folder in sorted(incoming.iterdir()):
         if not folder.is_dir() or folder.is_symlink() or folder.name.startswith('.') or not (folder/'READY').is_file():continue
         try:
             manifest=read(safe(folder,'manifest.json'));rows=manifest['files'];names=set()
             if manifest.get('schema_version')!=1 or not 1<=len(rows)<=10:raise ValueError('Manifeste invalide')
+            clean=[]
             for row in rows:
                 source=safe(folder,row['file'])
                 if row['file'] in names or not str(source).endswith(('.nii','.nii.gz')) or source.stat().st_size>300*1024**2 or fingerprint(source)!=row['sha256']:raise ValueError('Fichier invalide')
                 names.add(row['file'])
-                if row['site'] not in {'KKI','NYU','OHSU','PEK','Pittsburgh','Brown','WashU','NeuroIMAGE'} or row['cohort'] not in {'arrivals_reserve','evaluation_only','new_labeled','synthetic'} or not 1<=len(row['subject'])<=100:raise ValueError('Provenance invalide')
+                if row['site'] not in SITE_CODES or row['cohort'] not in {'arrivals_reserve','evaluation_only','new_labeled','synthetic'}:raise ValueError('Provenance invalide')
+                # Pseudonymisation dans le flux : un numéro de dossier (patient_id) est remplacé ici par un code
+                # calculé avec la clé secrète. Seul ce code est enregistré en base ; un identifiant en clair est refusé.
+                clean.append({'file':row['file'],'sha256':row['sha256'],'subject':subject_for(row,secret_key),'site':row['site'],'cohort':row['cohort']})
             identifier=fingerprint(folder/'manifest.json');backup=root()/'arrivals/raw'/identifier
             backup.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             if not backup.exists():
@@ -32,8 +42,9 @@ def collect():
                 staging.rename(backup)
             from psycopg.types.json import Jsonb
             with db() as conn:
-                conn.execute('INSERT INTO batches(id,manifest) VALUES (%s,%s) ON CONFLICT DO NOTHING',(identifier,Jsonb(manifest)))
-                for row in rows:
+                stored={**{k:v for k,v in manifest.items() if k!='files'},'files':clean}
+                conn.execute('INSERT INTO batches(id,manifest) VALUES (%s,%s) ON CONFLICT DO NOTHING',(identifier,Jsonb(stored)))
+                for row in clean:
                     conn.execute('INSERT INTO items(id,batch_id,subject,site,cohort,raw_ref) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',(row['sha256'],identifier,row['subject'],row['site'],row['cohort'],(backup/row['file']).relative_to(root()).as_posix()))
                     old=conn.execute('SELECT subject,site,cohort FROM items WHERE id=%s',(row['sha256'],)).fetchone()
                     if old['subject']!=row['subject'] or old['site']!=row['site'] or old['cohort']!=row['cohort']:raise ValueError('Association contradictoire')

@@ -69,6 +69,22 @@ services:
     <<: *app
     command: [python, -m, adhd.cli, worker]
     depends_on: {api: {condition: service_healthy}}
+    # Seul l'exécutant reçoit la clé de pseudonymisation : il brouille les identités à la collecte.
+    secrets: [api_key, admin_key, app_dsn, mlflow_password, kaggle_username, kaggle_key, pseudonymization_key]
+  # Étapes amont du trajet historique, lancées à la demande :
+  #   docker compose --profile history run --rm history python -m adhd.cli intake <étape> -- <arguments>
+  history:
+    <<: *app
+    profiles: [history]
+    command: [python, -m, adhd.cli, intake, --help]
+    volumes:
+      - ${ADHD_DATA:?Set ADHD_DATA}/raw:/data/raw:ro
+      - ${ADHD_DATA}/reports:/data/reports
+      - ${ADHD_DATA}/historical:/data/historical
+      - ${ADHD_DATA}/quarantine:/data/quarantine
+      - ./configs:/app/configs:ro
+    secrets: [pseudonymization_key]
+    restart: "no"
   dashboard:
     <<: *app
     command: [streamlit, run, /app/adhd/dashboard.py, --server.address, 0.0.0.0, --server.port, "8501", --browser.gatherUsageStats, "false"]
@@ -122,3 +138,5 @@ secrets:
   mlflow_password: {file: .runtime/mlflow_password}
   kaggle_username: {file: .runtime/kaggle_username}
   kaggle_key: {file: .runtime/kaggle_key}
+  # La clé reste dans le dépôt de données, jamais dans le dossier du code.
+  pseudonymization_key: {file: "${ADHD_DATA}/secrets/pseudonymization.key"}

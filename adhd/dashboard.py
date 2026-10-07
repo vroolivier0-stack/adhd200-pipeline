@@ -14,6 +14,13 @@ with data:
     st.caption('Brown : arrivées simulées, diagnostics inconnus. Aucune performance inventée.')
 with models:st.json(report['deployment']);st.caption('Champion et candidat sont de véritables versions entraînées. Aucun modèle n’est créé au démarrage.')
 with supervision:
+    costs=report.get('costs')
+    if costs:
+        st.subheader('Coûts estimés du pipeline')
+        st.dataframe(costs['tasks'])
+        st.write(f"Calcul local : {costs['compute_hours']} h, {costs['local_energy_kwh']} kWh, {costs['local_cost_eur']} €, {costs['local_co2_g']} g de CO2. Équivalent sur une petite machine cloud : {costs['cloud_cpu_equivalent_eur']} €. Entraînement : {costs['training_gpu_hours']} h de GPU (équivalent cloud {costs['training_cloud_equivalent_eur']} €).")
+        st.caption('Durées mesurées par le pipeline ; tarifs = hypothèses réglables dans configs/service.yaml.')
+    st.subheader('Événements de supervision')
     for value in report['events']:st.write(value['created_at'],value['kind']);st.json(value['body'])
 with explanation:
     ids=list(dict.fromkeys(r['item_id'] for r in report['predictions']))

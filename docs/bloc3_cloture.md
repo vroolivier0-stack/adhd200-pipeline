@@ -30,11 +30,11 @@ Le premier passage était planifié ; l'exercice de panne a été déclenché ma
 | 4.1 | Validation des formats/types | Tests Docker réussis et contrôles NIfTI/NPZ livrés ; citer les tests utiles, conserver leur sortie. |
 | 4.2 | Isolation des anomalies | Fichier corrompu isolé ; trois IRM valides traitées. |
 | 4.3 | Relance automatique | Panne API, état up_for_retry, seconde tentative et même DAG run réussis. |
-| 5.1 | Masquage des champs sensibles | Pseudonymisation HMAC ; preuve du code et revue de sorties à conserver. Ne pas appeler cela une anonymisation certifiée. |
+| 5.1 | Masquage des champs sensibles | Pseudonymisation HMAC dans le dépôt (`adhd/identity.py`), appliquée par l'étape de collecte ; identifiant en clair refusé ; tests ajoutés. À confirmer sur WSL : tests Docker, `identity-check`, lot réel avec numéros de dossier. Ne pas appeler cela une anonymisation certifiée. |
 | 5.2 | Secrets externalisés | Secrets montés dans les conteneurs ; auditer la sélection Git avant publication. |
 | 5.3 | Transferts sécurisés | Services publiés sur loopback, HTTPS distant ; réseau Docker local distinct d'un transit inter-sites chiffré. Documenter la limite et la destination Kaggle privée. |
 | 6.1 | Alertes panne/délai | Code et test watchdog présents ; vérifier l'alerte visible et la cadence réelle. Ne pas promettre une alerte instantanée avec un contrôle périodique. |
-| 6.2 | Coûts calcul/transfert | Docker/GPU mesurables ; synthèse de temps, mémoire, stockage et hypothèses de coût à finaliser. Aucun coût monétaire inventé. |
+| 6.2 | Coûts calcul/transfert | Estimation produite par le pipeline (`adhd/costs.py`) : durées mesurées × tarifs déclarés comme hypothèses dans `configs/service.yaml` ; affichée dans le tableau de bord ; rapport complet par `adhd.cli costs`. Heures de GPU à renseigner. |
 | 6.3 | Journaux d'audit | Journaux Airflow et événements persistants ; montrer l'erreur et sa reprise avec le même run ID. |
 | 7.1 | Lignage | source SHA → volume préparé/reçu → version → prédiction ; montrer un trajet vérifié, sans numéro patient brut. |
 | 7.2 | Backlog/priorisation | Priorité actuelle : terminer B3 avant nouvelle surveillance B4 ; statuts ci-dessous. |

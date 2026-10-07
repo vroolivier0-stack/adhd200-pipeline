@@ -69,3 +69,22 @@ class CoreTests(unittest.TestCase):
                     if name.endswith('.py'):compile(archive.read(name),name,'exec')
             (target/'dataset.csv').write_text('test');save_json(target/'review.json',{'csv_sha256':fingerprint(target/'dataset.csv')})
             with self.assertRaises(ValueError):gate(target,target/'review.json')
+    def test_identity_is_stable_keyed_and_refuses_clear_identifiers(self):
+        from adhd.identity import pseudonymize,subject_for,patient_from_path,SITE_CODES
+        key=bytes(range(32));other=bytes(range(1,33));code=pseudonymize(SITE_CODES['Brown'],'0026001',key)
+        self.assertEqual(code,pseudonymize(SITE_CODES['Brown'],'26001',key))          # zéros initiaux
+        self.assertNotEqual(code,pseudonymize(SITE_CODES['Brown'],'0026001',other))   # autre clé
+        self.assertNotEqual(code,pseudonymize(SITE_CODES['KKI'],'0026001',key))       # autre hôpital
+        self.assertRegex(code,'^sub_[0-9a-f]{32}$');self.assertNotIn('26001',code)
+        self.assertEqual(patient_from_path('Brown/0026001/session_1/anat_1/mprage.nii.gz'),'0026001')
+        self.assertEqual(subject_for({'patient_id':'0026001','site':'Brown','cohort':'arrivals_reserve'},lambda:key),code)
+        self.assertEqual(subject_for({'subject':code,'site':'Brown','cohort':'arrivals_reserve'},lambda:key),code)
+        with self.assertRaises(ValueError):subject_for({'subject':'0026001','site':'Brown','cohort':'arrivals_reserve'},lambda:key)
+        with self.assertRaises(ValueError):subject_for({'subject':code,'patient_id':'1','site':'Brown','cohort':'arrivals_reserve'},lambda:key)
+    def test_cost_estimate_uses_measured_durations(self):
+        from adhd.costs import estimate
+        rates={'local_power_watts':100,'electricity_eur_per_kwh':0.25,'grid_gco2_per_kwh':60,'cloud_cpu_eur_per_hour':0.10,'cloud_gpu_eur_per_hour':0.60,'storage_eur_per_gb_month':0.02,'gpu_hours_training':2}
+        result=estimate([{'kind':'prepare','runs':2,'seconds':3600,'peak_mib':500},{'kind':'predict','runs':1,'seconds':3600,'peak_mib':700}],rates,{'raw':10.0})
+        self.assertEqual(result['compute_hours'],2.0);self.assertEqual(result['local_energy_kwh'],0.2);self.assertEqual(result['local_cost_eur'],0.05)
+        self.assertEqual(result['tasks'][0]['seconds_mean'],1800.0);self.assertEqual(result['training_cloud_equivalent_eur'],1.2);self.assertEqual(result['storage_cloud_equivalent_eur_per_month'],0.2)
+

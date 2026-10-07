@@ -24,6 +24,13 @@ def prepare(project,data):
         if path.is_symlink():raise ValueError('Dossier symbolique refusé')
         path.mkdir(parents=True,exist_ok=True,mode=0o700)
     persistent.mkdir(parents=True,exist_ok=True,mode=0o700);runtime.mkdir(exist_ok=True,mode=0o700)
+    # Clé de pseudonymisation : créée UNIQUEMENT si elle n'existe pas (environnement neuf, tests).
+    # Une clé existante n'est jamais remplacée : les codes patients en dépendent.
+    key=data/'secrets/pseudonymization.key'
+    if key.is_symlink():raise ValueError('Lien refusé')
+    if not key.exists():
+        descriptor=os.open(key,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(descriptor,'wb') as stream:stream.write(secrets.token_bytes(32))
     if persistent.stat().st_mode&0o077 or runtime.is_symlink():raise ValueError('Secrets non privés')
     for name in ('postgres_password','app_password','airflow_password','api_key','admin_key','airflow_jwt'):write_private(persistent/name,secrets.token_hex(32)+'\n')
     app=(persistent/'app_password').read_text().strip();airflow=(persistent/'airflow_password').read_text().strip()

@@ -217,7 +217,12 @@ def summary():
         counts=conn.execute('SELECT status,count(*) AS n FROM items GROUP BY status').fetchall()
         predictions=conn.execute('SELECT p.*,i.site FROM predictions p JOIN items i ON i.id=p.item_id ORDER BY p.created_at DESC LIMIT 50').fetchall()
         events=conn.execute("SELECT kind,body,created_at FROM events WHERE kind IN ('alert','monitoring','resources','retraining','registry_check') ORDER BY created_at DESC LIMIT 20").fetchall()
-    return {'deployment':state(),'items':counts,'predictions':predictions,'events':events}
+    # Coûts estimés à partir des durées mesurées (voir adhd/costs.py) ; absents si non configurés.
+    try:
+        from .costs import summary as cost_summary
+        costs=cost_summary()
+    except Exception:costs=None
+    return {'deployment':state(),'items':counts,'predictions':predictions,'events':events,'costs':costs}
 
 @app.post('/watchdog',dependencies=[Depends(admin)])
 def watchdog():

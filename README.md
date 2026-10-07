@@ -11,6 +11,10 @@ Ce dépôt contient un pipeline qui reçoit des IRM cérébrales par lots, les c
 
 ![Schéma d'architecture du pipeline](docs/schema_architecture_bloc3.png)
 
+Ce premier schéma suit le trajet d'une IRM. Un second suit la vie du modèle : entraînement, registre, mise en service par étapes, surveillance, réentraînement.
+
+![Schéma d'architecture : la vie du modèle](docs/schema_architecture_bloc4.png)
+
 ## Le trajet d'une IRM
 
 Un hôpital dépose un lot dans la boîte de réception (`incoming/`). Toutes les 5 minutes, Airflow lance trois tâches. Chacune attend la réussite de la précédente.

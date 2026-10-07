@@ -22,4 +22,4 @@ costs:
   cloud_cpu_eur_per_hour: 0.10     # petite machine équivalente dans le cloud
   cloud_gpu_eur_per_hour: 0.60     # carte graphique d'entrée de gamme
   storage_eur_per_gb_month: 0.02
-  gpu_hours_training: 0            # heures de GPU consommées sur Kaggle : à renseigner
+  gpu_hours_training: 1.5            # session Kaggle du 6 octobre 2026, dont 0,94 h d'entraînement mesuré (88 époques)

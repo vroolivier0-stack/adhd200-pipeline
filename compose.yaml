@@ -71,6 +71,21 @@ services:
     depends_on: {api: {condition: service_healthy}}
     # Seul l'exécutant reçoit la clé de pseudonymisation : il brouille les identités à la collecte.
     secrets: [api_key, admin_key, app_dsn, mlflow_password, kaggle_username, kaggle_key, pseudonymization_key]
+  # Rapport de dérive Evidently, dans sa propre boîte :
+  #   docker compose --profile monitoring run --rm drift-report
+  drift-report:
+    profiles: [monitoring]
+    image: adhd200-evidently:local
+    build: {context: ., dockerfile: Dockerfile.evidently}
+    user: "${PIPELINE_UID:-1000}:${PIPELINE_GID:-1000}"
+    environment: {DATA_ROOT: /data, HOME: /tmp}
+    volumes:
+      - ${ADHD_DATA:?Set ADHD_DATA}/export_kaggle:/data/export_kaggle:ro
+      - ${ADHD_DATA}/reference:/data/reference
+      - ${ADHD_DATA}/reports/compact:/data/reports/compact
+    secrets: [app_dsn]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: "no"
   # Étapes amont du trajet historique, lancées à la demande :
   #   docker compose --profile history run --rm history python -m adhd.cli intake <étape> -- <arguments>
   history:

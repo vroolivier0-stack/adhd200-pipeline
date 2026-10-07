@@ -20,6 +20,7 @@ ALERTS = {
     'batch_delay': 'lot non terminé dans le délai prévu',
     'failed_job': 'tâche en échec après ses relances',
     'drift_or_performance_drop': 'dérive des images ou baisse de performance',
+    'registry_mismatch': 'le modèle servi ne correspond plus à l’étiquette du registre',
 }
 ROLES = (('champion', 'Champion (en service)'), ('catalog_challenger', 'Challenger (inscrit au registre)'), ('previous', 'Version précédente'))
 
@@ -200,6 +201,17 @@ with supervision:
             st.caption(body['limit'])
     else:
         st.info('Aucun contrôle enregistré.')
+    st.subheader('Rapport de dérive Evidently')
+    evidently = report.get('evidently')
+    if evidently:
+        text = (f"Rapport du {when(evidently['created_at'])} ({evidently['tool']}) : "
+                f"{evidently['drifted_columns']} mesure(s) sur {len(evidently['columns'])} en dérive, "
+                f"en comparant {evidently['current_images']} images reçues à {evidently['reference_images']} images d’entraînement.")
+        (st.error if evidently['drift_detected'] else st.success)(text)
+        st.caption('Images reçues par hôpital : ' + ', '.join(f"{k} {v}" for k, v in evidently['current_by_hospital'].items())
+                   + f". Fichier : reports/compact/evidently/{evidently['html']}. " + evidently['limit'])
+    else:
+        st.info('Aucun rapport Evidently. Commande : docker compose --profile monitoring run --rm drift-report')
     costs = report.get('costs')
     if costs:
         st.subheader('Durées mesurées et coûts estimés')

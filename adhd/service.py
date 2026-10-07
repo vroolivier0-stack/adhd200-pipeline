@@ -239,11 +239,14 @@ def summary():
         from .costs import summary as cost_summary
         costs=cost_summary()
     except Exception:costs=None
+    # Dernier rapport de dérive Evidently, s'il existe (voir adhd/drift_report.py).
+    try:evidently=read(root()/'reports/compact/evidently/latest.json')
+    except Exception:evidently=None
     deployment=state()
     known={p['version'] for p in predictions}|{deployment.get(k) for k in ('champion','challenger','previous','catalog_challenger')}
     versions={v:describe_version(v) for v in known if v}
     return {'deployment':deployment,'items':counts,'predictions':predictions,'events':events,'costs':costs,
-            'sites':sites,'batches':batches,'batch_count':batch_count,'quarantine':quarantine,'alerts':alerts,'monitoring':monitoring,'deployments':deployments,'versions':versions,
+            'sites':sites,'batches':batches,'batch_count':batch_count,'quarantine':quarantine,'alerts':alerts,'monitoring':monitoring,'deployments':deployments,'versions':versions,'evidently':evidently,
             'monitoring_minimum_subjects':settings().get('minimum_monitoring_subjects')}
 
 @app.post('/watchdog',dependencies=[Depends(admin)])

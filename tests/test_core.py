@@ -87,4 +87,20 @@ class CoreTests(unittest.TestCase):
         result=estimate([{'kind':'prepare','runs':2,'seconds':3600,'peak_mib':500},{'kind':'predict','runs':1,'seconds':3600,'peak_mib':700}],rates,{'raw':10.0})
         self.assertEqual(result['compute_hours'],2.0);self.assertEqual(result['local_energy_kwh'],0.2);self.assertEqual(result['local_cost_eur'],0.05)
         self.assertEqual(result['tasks'][0]['seconds_mean'],1800.0);self.assertEqual(result['training_cloud_equivalent_eur'],1.2);self.assertEqual(result['storage_cloud_equivalent_eur_per_month'],0.2)
+    def test_drift_report_reference_table_has_measures_and_no_identifier(self):
+        import os
+        from unittest.mock import patch
+        from adhd import drift_report
+        from adhd.flow import features
+        with tempfile.TemporaryDirectory() as directory:
+            package=Path(directory)/'export_kaggle'/'kaggle_test';package.mkdir(parents=True);rng=np.random.default_rng(0)
+            for name in ('image_000001.npz','image_000002.npz'):np.savez_compressed(package/name,image=rng.random((8,8,8),dtype=np.float32))
+            (package/'dataset.csv').write_text('image_id,file,split,target,site,sha256\nimage_000001,image_000001.npz,train,0,KKI,x\nimage_000002,image_000002.npz,validation,1,NYU,y\n')
+            (package/'LOCAL_EXPORT_COMPLETE.txt').write_text('complete')
+            with patch.dict(os.environ,{'DATA_ROOT':directory}):
+                table=drift_report.reference_table();again=drift_report.reference_table()
+            with np.load(package/'image_000001.npz') as archive:expected=list(features(archive['image']).values())
+        self.assertEqual(list(table.columns),['hopital',*drift_report.COLUMNS]);self.assertEqual(len(table),1)   # entraînement seulement
+        self.assertTrue(np.allclose(table.iloc[0,1:].astype(float).to_numpy(),expected));self.assertEqual(len(again),1)
+        self.assertNotIn('image_000001',table.to_csv())
 
